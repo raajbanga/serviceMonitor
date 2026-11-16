@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>serviceMonitor</title>
+<meta name="description" content="A TCP/UDP heartbeat monitor in Python and Docker. Replay a recorded run or open your own audit log.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M2 17h7l3-9 5 16 3-7h10' fill='none' stroke='%231f8a70' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<script src="sample-run.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1" integrity="sha384-jb8JQMbMoBUzgWatfe6COACi2ljcDdZQ2OxczGA3bGNeWe+6DChMTBJemed7ZnvJ" crossorigin="anonymous"></script>
+<style>
+:root {
+  --paper: #f3f5f7;
+  --surface: #ffffff;
+  --ink: #17222e;
+  --muted: #627285;
+  --rule: #d5dce3;
+  --alive: #1f8a70;
+  --down: #c8402e;
+  --down-wash: rgba(200, 64, 46, 0.12);
+  --sans: "IBM Plex Sans", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, monospace;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: var(--paper); color: var(--ink); font: 16px/1.55 var(--sans); }
+a { color: inherit; text-underline-offset: 3px; }
+:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.wrap { max-width: 1120px; margin: 0 auto; padding: 48px 24px 72px; }
+
+header { margin-bottom: 28px; }
+h1 { font-size: 34px; font-weight: 600; letter-spacing: -0.01em; }
+.lede { color: var(--muted); max-width: 62ch; margin-top: 6px; }
+.actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 18px; }
+button, .btn { font: 500 14px var(--sans); padding: 9px 16px; border-radius: 6px; border: 1px solid var(--ink); background: var(--ink); color: #fff; cursor: pointer; text-decoration: none; display: inline-block; }
+button.quiet, .btn.quiet { background: transparent; color: var(--ink); }
+button:disabled { opacity: .5; cursor: default; }
+
+/* hero: swimlane */
+.run { background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; overflow: hidden; margin-bottom: 44px; }
+.lanes { padding: 22px 24px 16px; }
+.lanes svg { width: 100%; height: auto; display: block; overflow: visible; }
+.lane-label { font: 500 14px var(--sans); fill: var(--ink); }
+.axis text { font: 12px var(--sans); fill: var(--muted); }
+.readout { min-height: 3.2em; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--rule); font: 13px/1.6 var(--mono); color: var(--muted); }
+.readout b { color: var(--ink); font-weight: 500; }
+.readout .crit { color: var(--down); }
+.legend { display: flex; gap: 20px; flex-wrap: wrap; font-size: 13px; color: var(--muted); margin-top: 12px; }
+.legend i { display: inline-block; width: 14px; height: 10px; margin-right: 6px; vertical-align: -1px; border-radius: 2px; }
+
+/* stats strip */
+.stats { display: grid; grid-template-columns: repeat(4, 1fr); border-top: 1px solid var(--rule); background: #f9fafb; }
+.stat { padding: 14px 24px 16px; }
+.stat + .stat { border-left: 1px solid var(--rule); }
+.stat .v { font-size: 28px; font-weight: 600; line-height: 1.2; font-variant-numeric: tabular-nums; }
+.stat .v.crit { color: var(--down); }
+.stat .k { color: var(--muted); font-size: 14px; }
+
+h2 { font-size: 20px; font-weight: 600; margin-bottom: 4px; }
+.sub { color: var(--muted); font-size: 14px; margin-bottom: 14px; max-width: 62ch; }
+.split { display: grid; grid-template-columns: 1.6fr 1fr; gap: 48px; margin-bottom: 48px; }
+.split > section:first-child { display: flex; flex-direction: column; }
+.chart-box { position: relative; flex: 1; min-height: 300px; }
+ol.steps { list-style: none; counter-reset: s; }
+ol.steps li { counter-increment: s; position: relative; padding: 0 0 14px 40px; }
+ol.steps li:last-child { padding-bottom: 0; }
+ol.steps li::before { content: counter(s); position: absolute; left: 0; top: 0; width: 26px; height: 26px; border-radius: 50%; border: 1px solid var(--ink); display: grid; place-items: center; font-size: 13px; font-weight: 500; }
+ol.steps code { font: 13px var(--mono); background: var(--surface); border: 1px solid var(--rule); padding: 1px 5px; border-radius: 4px; }
+
+/* event log */
+.log-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap; margin-bottom: 14px; }
+.log-head .sub { margin-bottom: 0; }
+.filters { display: flex; gap: 16px; flex-wrap: wrap; align-items: center; font-size: 14px; }
+select { font: 14px var(--sans); padding: 6px 8px; border: 1px solid var(--rule); border-radius: 6px; background: var(--surface); color: var(--ink); }
+.log { background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; max-height: 380px; overflow: auto; }
+th:nth-child(1) { width: 112px; } th:nth-child(2) { width: 104px; }
+table { width: 100%; border-collapse: collapse; font: 13px/1.5 var(--mono); }
+th { position: sticky; top: 0; background: var(--surface); text-align: left; font: 500 13px var(--sans); color: var(--muted); padding: 10px 14px; border-bottom: 1px solid var(--rule); }
+td { padding: 6px 14px; border-bottom: 1px solid #eef1f4; vertical-align: top; }
+td.t { color: var(--muted); white-space: nowrap; }
+tr.CRITICAL td { color: var(--down); background: var(--down-wash); }
+tr.DEBUG td:not(.t) { color: var(--muted); }
+.empty { padding: 28px; color: var(--muted); font: 14px var(--sans); }
+.err { color: var(--down); font-size: 14px; margin-top: 8px; }
+footer { margin-top: 40px; color: var(--muted); font-size: 14px; }
+footer code { font: 13px var(--mono); }
+
+@media (max-width: 820px) {
+  .lanes { overflow-x: auto; }
+  .lanes svg { min-width: 680px; }
+  .split { grid-template-columns: 1fr; }
+  .stats { grid-template-columns: repeat(2, 1fr); }
+  .lanes { padding: 18px 16px 14px; }
+  .stat { padding: 12px 16px 14px; }
+  .legend { gap: 6px 16px; font-size: 12px; }
+  th:nth-child(1) { width: 72px; } th:nth-child(2) { width: 76px; }
+  th, td { padding-left: 10px; padding-right: 8px; }
+  table { font-size: 12px; }
+  .stat:nth-child(3) { border-left: 0; }
+  .stat:nth-child(n+3) { border-top: 1px solid var(--rule); }
+  h1 { font-size: 28px; }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div>
+    <h1>serviceMonitor</h1>
+    <p class="lede">A monitor that watches containers over the network. Agents register over TCP, then send a UDP heartbeat every 3 seconds. When one goes quiet for 9 seconds, the monitor logs it as down.</p>
+  </div>
+  <div class="actions">
+    <button id="replay" type="button">Replay the run</button>
+    <label class="btn quiet" for="file" tabindex="0">Open an audit log</label>
+    <input id="file" type="file" accept=".txt,.log,text/plain" hidden>
+    <a class="btn quiet" href="https://github.com/raajbanga/serviceMonitor">Source on GitHub</a>
+  </div>
+</header>
+
+<div class="run">
+<section class="lanes" aria-label="Heartbeat timeline">
+  <svg id="lanes" role="img" aria-labelledby="lanes-desc"><desc id="lanes-desc">Heartbeats per agent over time, with the periods the monitor considered each agent down.</desc></svg>
+  <div class="legend">
+    <span><i style="background:var(--alive)"></i>Heartbeat received</span>
+    <span><i style="background:var(--down-wash);border:1px solid var(--down)"></i>Silent, then flagged down</span>
+    <span><i style="background:var(--down)"></i>DOWN alert written</span>
+  </div>
+  <div class="readout" id="readout" aria-live="polite">Hover over the timeline to see what the monitor logged at that moment.</div>
+  <p class="err" id="err" hidden></p>
+</section>
+
+<section class="stats" aria-label="Run summary">
+  <div class="stat"><div class="v" id="s-agents">–</div><div class="k">agents seen</div></div>
+  <div class="stat"><div class="v" id="s-beats">–</div><div class="k">heartbeats received</div></div>
+  <div class="stat"><div class="v crit" id="s-downs">–</div><div class="k">down alerts</div></div>
+  <div class="stat"><div class="v" id="s-detect">–</div><div class="k">slowest detection</div></div>
+</section>
+</div>
+
+<div class="split">
+  <section>
+    <h2>Silence per agent</h2>
+    <p class="sub">Seconds since each agent's last heartbeat. A healthy agent resets every 3 seconds; a line that climbs past 9 seconds is an outage.</p>
+    <div class="chart-box"><canvas id="gaps" aria-label="Line chart of how long each agent has been silent"></canvas></div>
+  </section>
+  <section>
+    <h2>How it works</h2>
+    <p class="sub">Three Python agents and one monitor, each in its own container on a Docker bridge network.</p>
+    <ol class="steps">
+      <li>An agent connects over TCP and sends <code>REGISTER agent1</code>. The monitor answers <code>ACK</code> and starts a watcher thread for it.</li>
+      <li>Every 3 seconds the agent sends a UDP datagram, <code>HB agent1</code>. Each one resets the watcher's clock.</li>
+      <li>If 9 seconds pass with no heartbeat, the watcher writes a <code>CRITICAL</code> DOWN line to the audit log.</li>
+      <li>When heartbeats come back, the agent is marked active again and a new watcher starts.</li>
+    </ol>
+  </section>
+</div>
+
+<section>
+  <div class="log-head">
+    <div>
+      <h2>Audit log</h2>
+      <p class="sub" id="log-src">The recorded run in <a href="sample-run.log">sample-run.log</a>.</p>
+    </div>
+    <div class="filters">
+      <label>Agent <select id="f-agent"><option value="">All</option></select></label>
+      <label><input type="checkbox" id="f-hb"> Show heartbeats</label>
+    </div>
+  </div>
+  <div class="log"><table><thead><tr><th>Time (UTC)</th><th>Level</th><th>Message</th></tr></thead><tbody id="rows"></tbody></table></div>
+</section>
+
+<footer>Built with Python sockets and Docker Compose. Run it yourself with <code>docker compose up</code>; the instructions are in the <a href="https://github.com/raajbanga/serviceMonitor#readme">README</a>.</footer>
+</div>
+
+<script>
+const NS = "http://www.w3.org/2000/svg";
+const C = { ink: "#17222e", muted: "#627285", rule: "#d5dce3", alive: "#1f8a70", down: "#c8402e" };
+const LINE = /^(\S+) \[(\w+)\] (.*)$/;
+let run = null, chart = null, replayTimer = null;
+Chart.defaults.font.family = "'IBM Plex Sans', system-ui, sans-serif";
+
+function parse(text) {
+  const events = [];
+  for (const raw of text.split(/\r?\n/)) {
+    const m = raw.match(LINE);
+    if (!m) continue;
+    const t = new Date(m[1]);
+    if (isNaN(t)) continue;
+    const ev = { t, iso: m[1], level: m[2], msg: m[3], agent: null, kind: "other" };
+    let x;
+    if ((x = m[3].match(/^Heartbeat from (\S+)/))) { ev.agent = x[1]; ev.kind = "hb"; }
+    else if ((x = m[3].match(/^Agent (\S+) DOWN \(no heartbeat for ([\d.]+)s\)/))) { ev.agent = x[1]; ev.kind = "down"; ev.idle = +x[2]; }
+    else if ((x = m[3].match(/^Agent (\S+) (registered|heartbeat resumed)/))) { ev.agent = x[1]; ev.kind = "up"; }
+    events.push(ev);
+  }
+  if (!events.length) throw new Error("No audit log lines found. Each line should look like: 2026-01-01T00:00:00+00:00 [INFO] message");
+  const t0 = events[0].t, tEnd = events[events.length - 1].t;
+  const sec = t => (t - t0) / 1000;
+  const agents = [...new Set(events.filter(e => e.agent).map(e => e.agent))].sort();
+  const lanes = agents.map(a => {
+    const beats = events.filter(e => e.agent === a && e.kind === "hb").map(e => sec(e.t));
+    const outages = events.filter(e => e.agent === a && e.kind === "down").map(d => {
+      const tDown = sec(d.t);
+      const last = Math.max(...beats.filter(b => b <= tDown), 0);
+      const back = events.find(e => e.agent === a && e.kind !== "down" && e.t > d.t);
+      return { from: last, alert: tDown, to: back ? sec(back.t) : sec(tEnd), idle: d.idle };
+    });
+    return { agent: a, beats, outages };
+  });
+  return { events, t0, span: Math.max(sec(tEnd), 1), sec, agents, lanes };
+}
+
+function el(tag, attrs, parent) {
+  const n = document.createElementNS(NS, tag);
+  for (const k in attrs) n.setAttribute(k, attrs[k]);
+  parent && parent.appendChild(n);
+  return n;
+}
+
+function drawLanes(upTo = Infinity) {
+  const svg = document.getElementById("lanes");
+  svg.querySelectorAll(":scope > g").forEach(g => g.remove());
+  const W = 1060, left = 72, right = 16, laneH = 54, top = 8;
+  const H = top + run.lanes.length * laneH + 34;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  const x = s => left + (s / run.span) * (W - left - right);
+  const g = el("g", {}, svg);
+
+  // time axis
+  const axis = el("g", { class: "axis" }, g);
+  const step = run.span > 300 ? 60 : run.span > 120 ? 30 : 10;
+  for (let s = 0; s <= run.span; s += step) {
+    el("line", { x1: x(s), x2: x(s), y1: top, y2: H - 26, stroke: C.rule, "stroke-width": 1 }, axis);
+    el("text", { x: x(s), y: H - 8, "text-anchor": "middle" }, axis).textContent = `${s}s`;
+  }
+
+  run.lanes.forEach((lane, i) => {
+    const cy = top + i * laneH + laneH / 2;
+    el("text", { x: 0, y: cy + 5, class: "lane-label" }, g).textContent = lane.agent;
+    el("line", { x1: left, x2: W - right, y1: cy, y2: cy, stroke: C.rule, "stroke-dasharray": "2 4" }, g);
+    for (const o of lane.outages) {
+      if (o.from > upTo) continue;
+      el("rect", { x: x(o.from), y: cy - 15, width: Math.max(x(Math.min(o.to, upTo)) - x(o.from), 0), height: 30, fill: "rgba(200,64,46,0.12)", rx: 3 }, g);
+      if (o.alert <= upTo) el("path", { d: `M${x(o.alert) - 7},${cy - 19} h14 l-7,10 z`, fill: C.down }, g);
+    }
+    for (const b of lane.beats) {
+      if (b > upTo) break;
+      el("line", { x1: x(b), x2: x(b), y1: cy - 12, y2: cy + 12, stroke: C.alive, "stroke-width": 3, "stroke-linecap": "round" }, g);
+    }
+  });
+
+  // playhead / hover target
+  const head = el("line", { y1: top, y2: H - 26, stroke: C.ink, "stroke-width": 1, opacity: upTo === Infinity ? 0 : 1 }, g);
+  if (upTo !== Infinity) { head.setAttribute("x1", x(upTo)); head.setAttribute("x2", x(upTo)); }
+  const hit = el("rect", { x: left, y: 0, width: W - left - right, height: H - 26, fill: "transparent" }, g);
+  hit.addEventListener("mousemove", e => {
+    if (replayTimer) return;
+    const p = svg.createSVGPoint(); p.x = e.clientX; p.y = e.clientY;
+    const sx = p.matrixTransform(svg.getScreenCTM().inverse()).x;
+    const s = Math.max(0, Math.min(run.span, (sx - left) / (W - left - right) * run.span));
+    head.setAttribute("x1", x(s)); head.setAttribute("x2", x(s)); head.setAttribute("opacity", 1);
+    showAt(s);
+  });
+  hit.addEventListener("mouseleave", () => { if (!replayTimer) head.setAttribute("opacity", 0); });
+}
+
+function showAt(s) {
+  const r = document.getElementById("readout");
+  const near = run.events.filter(e => Math.abs(run.sec(e.t) - s) <= 1.5 && e.kind !== "hb");
+  const beats = run.events.filter(e => Math.abs(run.sec(e.t) - s) <= 1.5 && e.kind === "hb").map(e => e.agent);
+  const lines = near.map(e => `<div class="${e.level === "CRITICAL" ? "crit" : ""}"><b>${e.iso.slice(11, 19)}</b> [${e.level}] ${esc(e.msg)}</div>`);
+  if (beats.length) lines.push(`<div><b>${s.toFixed(0)}s</b> heartbeats from ${[...new Set(beats)].join(", ")}</div>`);
+  r.innerHTML = lines.length ? lines.join("") : `<div><b>${s.toFixed(0)}s</b> nothing logged</div>`;
+}
+
+function replay() {
+  if (replayTimer) return;
+  const btn = document.getElementById("replay");
+  btn.disabled = true;
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const duration = reduce ? 1 : 6000, start = performance.now();
+  const tick = now => {
+    const s = Math.min(1, (now - start) / duration) * run.span;
+    drawLanes(s); showAt(s);
+    if (s < run.span) replayTimer = requestAnimationFrame(tick);
+    else { replayTimer = null; btn.disabled = false; drawLanes(); }
+  };
+  replayTimer = requestAnimationFrame(tick);
+}
+
+function stats() {
+  const downs = run.events.filter(e => e.kind === "down");
+  document.getElementById("s-agents").textContent = run.agents.length;
+  document.getElementById("s-beats").textContent = run.events.filter(e => e.kind === "hb").length.toLocaleString();
+  document.getElementById("s-downs").textContent = downs.length;
+  document.getElementById("s-detect").textContent = downs.length ? `${Math.max(...downs.map(d => d.idle)).toFixed(1)} s` : "–";
+}
+
+function gaps() {
+  const palette = ["#1f8a70", "#3e6fa8", "#a0782a", "#7a5aa6", "#3a8fa0"];
+  // sawtooth: silence grows from 0 at each heartbeat until the next one (or the end of the run)
+  const datasets = run.lanes.map((lane, i) => {
+    const pts = [];
+    lane.beats.forEach((b, j) => {
+      const next = j + 1 < lane.beats.length ? lane.beats[j + 1] : run.span;
+      pts.push({ x: b, y: 0 }, { x: next, y: +(next - b).toFixed(1) });
+    });
+    return { label: lane.agent, data: pts, borderColor: palette[i % palette.length], backgroundColor: palette[i % palette.length],
+      borderWidth: 1.6, pointRadius: 0, pointHoverRadius: 4, tension: 0 };
+  });
+  const limit = { id: "timeout", afterDraw(c) {
+    const y = c.scales.y.getPixelForValue(9), { left, right } = c.chartArea, ctx = c.ctx;
+    ctx.save(); ctx.strokeStyle = C.down; ctx.setLineDash([5, 4]); ctx.beginPath(); ctx.moveTo(left, y); ctx.lineTo(right, y); ctx.stroke();
+    ctx.fillStyle = C.down; ctx.font = "12px 'IBM Plex Sans', sans-serif"; ctx.fillText("9 s timeout: the agent is flagged down", left + 6, y - 6); ctx.restore();
+  } };
+  chart && chart.destroy();
+  chart = new Chart(document.getElementById("gaps"), {
+    type: "line", data: { datasets }, plugins: [limit],
+    options: {
+      responsive: true, maintainAspectRatio: false, animation: false, parsing: false,
+      interaction: { mode: "nearest", intersect: false },
+      plugins: { legend: { position: "top", align: "start", labels: { usePointStyle: true, pointStyle: "line", boxWidth: 18, color: C.ink } },
+        tooltip: { callbacks: { title: () => "", label: c => `${c.dataset.label}: ${c.parsed.y}s of silence at ${c.parsed.x.toFixed(0)}s` } } },
+      scales: {
+        x: { type: "linear", min: 0, max: Math.ceil(run.span), title: { display: true, text: "Seconds since the monitor started", color: C.muted }, grid: { color: "#eef1f4" }, ticks: { color: C.muted } },
+        y: { beginAtZero: true, suggestedMax: 12, title: { display: true, text: "Seconds of silence", color: C.muted }, grid: { color: "#eef1f4" }, ticks: { color: C.muted } },
+      },
+    },
+  });
+}
+
+function table() {
+  const agent = document.getElementById("f-agent").value;
+  const showHb = document.getElementById("f-hb").checked;
+  const rows = run.events.filter(e => (!agent || e.agent === agent) && (showHb || e.kind !== "hb"));
+  document.getElementById("rows").innerHTML = rows.length
+    ? rows.map(e => `<tr class="${e.level}"><td class="t">${e.iso.slice(11, 19)}</td><td>${e.level}</td><td>${esc(e.msg)}</td></tr>`).join("")
+    : `<tr><td colspan="3" class="empty">No lines match these filters.</td></tr>`;
+}
+
+function esc(s) { return s.replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+
+function load(text, source) {
+  const err = document.getElementById("err");
+  try { run = parse(text); err.hidden = true; }
+  catch (e) { err.textContent = e.message; err.hidden = false; return; }
+  const sel = document.getElementById("f-agent");
+  sel.innerHTML = '<option value="">All</option>' + run.agents.map(a => `<option>${a}</option>`).join("");
+  if (source) document.getElementById("log-src").textContent = `Loaded from ${source}.`;
+  drawLanes(); stats(); gaps(); table();
+}
+
+document.getElementById("replay").addEventListener("click", replay);
+document.getElementById("f-agent").addEventListener("change", table);
+document.getElementById("f-hb").addEventListener("change", table);
+document.getElementById("file").addEventListener("change", e => {
+  const f = e.target.files[0];
+  if (f) f.text().then(t => load(t, f.name));
+});
+document.querySelector("label[for=file]").addEventListener("keydown", e => {
+  if (e.key === "Enter" || e.key === " ") { e.preventDefault(); document.getElementById("file").click(); }
+});
+
+// sample-run.js defines SAMPLE_LOG through a plain script tag, so this also works when the page is opened from disk
+if (typeof SAMPLE_LOG === "string") load(SAMPLE_LOG);
+else {
+  const err = document.getElementById("err");
+  err.textContent = "The recorded run (sample-run.js) is missing. Use “Open an audit log” to load logs/audit_log.txt from your own run.";
+  err.hidden = false;
+}
+</script>
+</body>
+</html>

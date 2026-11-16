@@ -1,0 +1,58 @@
+services:
+  monitor:
+    build: ./monitor
+    networks: [monitor_net]
+    ports:
+      - "8001:8001/tcp"
+      - "8002:8002/udp"
+    volumes:
+      - ./logs:/var/log/service-monitor
+    environment:
+      AUDIT_LOG_PATH: /var/log/service-monitor/audit_log.txt
+      HEARTBEAT_TIMEOUT_SEC: "9"
+
+  agent1:
+    build: ./agent
+    environment:
+      AGENT_ID: agent1
+      MONITOR_HOST: monitor
+      HEARTBEAT_INTERVAL_SEC: "3"
+    depends_on: [monitor]
+    networks: [monitor_net]
+
+  agent2:
+    build: ./agent
+    environment:
+      AGENT_ID: agent2
+      MONITOR_HOST: monitor
+      HEARTBEAT_INTERVAL_SEC: "3"
+    depends_on: [monitor]
+    networks: [monitor_net]
+
+  agent3:
+    build: ./agent
+    environment:
+      AGENT_ID: agent3
+      MONITOR_HOST: monitor
+      HEARTBEAT_INTERVAL_SEC: "3"
+    depends_on: [monitor]
+    networks: [monitor_net]
+
+  capture:
+    image: nicolaka/netshoot
+    profiles: [capture]
+    depends_on: [monitor]
+    network_mode: "service:monitor"
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    volumes:
+      - ./captures:/captures
+    command: >
+      tshark -i eth0
+      -f "tcp port 8001 or udp port 8002"
+      -w /captures/heartbeats.pcapng
+
+networks:
+  monitor_net:
+    driver: bridge
